@@ -36,7 +36,7 @@ Features include:
 - **🧠 Schema Intelligence** - context-aware SQL generation based on detailed understanding of the database schema.
 - **🛡️ Safe SQL Execution** - configurable access control, including support for read-only mode and safe SQL parsing, making it usable for both development and production.
 
-Postgres MCP Pro supports both the [Standard Input/Output (stdio)](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) and [Server-Sent Events (SSE)](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse) transports, for flexibility in different environments.
+Postgres MCP Pro supports [Standard Input/Output (stdio)](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio), [Server-Sent Events (SSE)](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse), and Streamable HTTP transports.
 
 For additional background on why we built Postgres MCP Pro, see [our launch blog post](https://www.crystaldba.ai/blog/post/announcing-postgres-mcp-server-pro).
 
@@ -136,12 +136,27 @@ You will now edit the `mcpServers` section of the configuration file.
         "-i",
         "--rm",
         "-e",
-        "DATABASE_URI",
+        "POSTGRES_USERNAME",
+        "-e",
+        "POSTGRES_PASSWORD",
+        "-e",
+        "POSTGRES_HOST",
+        "-e",
+        "POSTGRES_PORT",
+        "-e",
+        "POSTGRES_DATABASE",
+        "-e",
+        "POSTGRES_SSL_MODE",
         "crystaldba/postgres-mcp",
         "--access-mode=unrestricted"
       ],
       "env": {
-        "DATABASE_URI": "postgresql://username:password@localhost:5432/dbname"
+        "POSTGRES_USERNAME": "username",
+        "POSTGRES_PASSWORD": "password",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DATABASE": "dbname",
+        "POSTGRES_SSL_MODE": "disable"
       }
     }
   }
@@ -165,7 +180,12 @@ The Postgres MCP Pro Docker image will automatically remap the hostname `localho
         "--access-mode=unrestricted"
       ],
       "env": {
-        "DATABASE_URI": "postgresql://username:password@localhost:5432/dbname"
+        "POSTGRES_USERNAME": "username",
+        "POSTGRES_PASSWORD": "password",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DATABASE": "dbname",
+        "POSTGRES_SSL_MODE": "disable"
       }
     }
   }
@@ -184,7 +204,12 @@ The Postgres MCP Pro Docker image will automatically remap the hostname `localho
         "--access-mode=unrestricted"
       ],
       "env": {
-        "DATABASE_URI": "postgresql://username:password@localhost:5432/dbname"
+        "POSTGRES_USERNAME": "username",
+        "POSTGRES_PASSWORD": "password",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DATABASE": "dbname",
+        "POSTGRES_SSL_MODE": "disable"
       }
     }
   }
@@ -205,7 +230,12 @@ The Postgres MCP Pro Docker image will automatically remap the hostname `localho
         "--access-mode=unrestricted"
       ],
       "env": {
-        "DATABASE_URI": "postgresql://username:password@localhost:5432/dbname"
+        "POSTGRES_USERNAME": "username",
+        "POSTGRES_PASSWORD": "password",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DATABASE": "dbname",
+        "POSTGRES_SSL_MODE": "disable"
       }
     }
   }
@@ -213,7 +243,22 @@ The Postgres MCP Pro Docker image will automatically remap the hostname `localho
 ```
 
 
-##### Connection URI
+##### Database Configuration
+
+You can configure the connection using either `DATABASE_URI` (legacy) or the `POSTGRES_*` environment variables (recommended).
+
+**Recommended (POSTGRES_*)**
+
+```bash
+export POSTGRES_USERNAME=your_username
+export POSTGRES_PASSWORD=your_password
+export POSTGRES_HOST=your_db_host
+export POSTGRES_PORT=5432
+export POSTGRES_DATABASE=your_database
+export POSTGRES_SSL_MODE=disable
+```
+
+**Legacy (DATABASE_URI)**
 
 Replace `postgresql://...` with your [Postgres database connection URI](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING-URIS).
 
@@ -245,9 +290,59 @@ For example, with Docker run:
 
 ```bash
 docker run -p 8000:8000 \
-  -e DATABASE_URI=postgresql://username:password@localhost:5432/dbname \
+  -e POSTGRES_USERNAME=username \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_HOST=localhost \
+  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_DATABASE=dbname \
+  -e POSTGRES_SSL_MODE=disable \
   crystaldba/postgres-mcp --access-mode=unrestricted --transport=sse
 ```
+
+## Streamable HTTP Transport
+
+Postgres MCP Pro supports the MCP Streamable HTTP transport for clients that require it (e.g., n8n).
+
+### Docker Compose (Recommended)
+
+1. Create a `.env` file (see `.env.example`)
+2. Start the service:
+
+```bash
+docker compose up -d
+```
+
+The server will be available at `http://localhost:${STREAMABLE_HTTP_PORT:-8000}/mcp`.
+
+### CLI
+
+Start the server:
+
+```bash
+postgres-mcp --transport=streamable-http --streamable-http-host=0.0.0.0 --streamable-http-port=8000
+```
+
+The default endpoint path is `/mcp`.
+
+### Optional API Key (Streamable HTTP Only)
+
+If `MCP_API_KEY` is set, streamable HTTP requests must include `X-API-Key` with that value. If not set, requests are allowed without authentication.
+
+Example request:
+
+```bash
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "X-API-Key: $MCP_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"0.0.0"}}}'
+```
+
+## Changelog Notes
+
+- Added `docker-compose.yml` for streamable HTTP deployment.
+- Added `.env.example` and documented POSTGRES_* configuration defaults.
+- Added optional `MCP_API_KEY` auth for streamable HTTP.
 
 Then update your MCP client configuration to call the the MCP server.
 For example, in Cursor's `mcp.json` or Cline's `cline_mcp_settings.json` you can put:

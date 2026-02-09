@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import sys
+from urllib.parse import quote
 from enum import Enum
 from typing import Any
 from typing import List
@@ -16,6 +17,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from pydantic import validate_call
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from postgres_mcp.index.dta_calc import DatabaseTuningAdvisor
 
@@ -57,6 +60,62 @@ class AccessMode(str, Enum):
 db_connection = DbConnPool()
 current_access_mode = AccessMode.UNRESTRICTED
 shutdown_in_progress = False
+API_KEY_HEADER = "X-API-Key"
+
+
+def build_database_url(database_url: str | None) -> str | None:
+    """Build database URL from env vars with DATABASE_URI fallback."""
+    if database_url:
+        return database_url
+
+    username = os.environ.get("POSTGRES_USERNAME")
+    password = os.environ.get("POSTGRES_PASSWORD")
+    host = os.environ.get("POSTGRES_HOST")
+    database = os.environ.get("POSTGRES_DATABASE")
+
+    if not all([username, password, host, database]):
+        return None
+
+    assert username is not None
+    assert password is not None
+    assert host is not None
+    assert database is not None
+
+    port = int(os.environ.get("POSTGRES_PORT", "5432"))
+    ssl_mode = os.environ.get("POSTGRES_SSL_MODE", "disable")
+
+    return (
+        "postgresql://"
+        f"{quote(username)}:{quote(password)}@{host}:{port}/{database}"
+        f"?sslmode={ssl_mode}"
+    )
+
+
+class StreamableHttpApiKeyMiddleware(BaseHTTPMiddleware):
+    """Optional API key auth for Streamable HTTP requests."""
+
+    def __init__(self, app, api_key: str, path: str):
+        super().__init__(app)
+        self.api_key = api_key
+        self.path = path
+
+    async def dispatch(self, request, call_next):
+        if request.url.path == self.path and request.method != "OPTIONS":
+            incoming_key = request.headers.get(API_KEY_HEADER)
+            if not incoming_key or incoming_key != self.api_key:
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32001,
+                            "message": "Unauthorized",
+                        },
+                        "id": None,
+                    },
+                    status_code=401,
+                )
+
+        return await call_next(request)
 
 
 async def get_sql_driver() -> Union[SqlDriver, SafeSqlDriver]:
@@ -626,11 +685,11 @@ async def main():
     logger.info(f"Starting PostgreSQL MCP Server in {current_access_mode.upper()} mode")
 
     # Get database URL from environment variable or command line
-    database_url = os.environ.get("DATABASE_URI", args.database_url)
+    database_url = build_database_url(os.environ.get("DATABASE_URI", args.database_url))
 
     if not database_url:
         raise ValueError(
-            "Error: No database URL provided. Please specify via 'DATABASE_URI' environment variable or command-line argument.",
+            "Error: No database URL provided. Set DATABASE_URI or POSTGRES_* environment variables.",
         )
 
     # Initialize database connection pool
@@ -666,7 +725,27 @@ async def main():
     elif args.transport == "streamable-http":
         mcp.settings.host = args.streamable_http_host
         mcp.settings.port = args.streamable_http_port
-        await mcp.run_streamable_http_async()
+        api_key = os.environ.get("MCP_API_KEY")
+        if api_key:
+            import uvicorn
+
+            app = mcp.streamable_http_app()
+            app.add_middleware(
+                StreamableHttpApiKeyMiddleware,
+                api_key=api_key,
+                path=mcp.settings.streamable_http_path,
+            )
+
+            config = uvicorn.Config(
+                app,
+                host=mcp.settings.host,
+                port=mcp.settings.port,
+                log_level=mcp.settings.log_level.lower(),
+            )
+            server = uvicorn.Server(config)
+            await server.serve()
+        else:
+            await mcp.run_streamable_http_async()
 
 
 async def shutdown(sig=None):

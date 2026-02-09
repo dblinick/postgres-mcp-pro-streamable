@@ -1,0 +1,19 @@
+services:
+  postgres-mcp:
+    build: .
+    ports:
+      - "${STREAMABLE_HTTP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      POSTGRES_SSL_MODE: ${POSTGRES_SSL_MODE:-disable}
+      MCP_API_KEY: ${MCP_API_KEY:-}
+    command:
+      - "--transport=streamable-http"
+      - "--streamable-http-host=0.0.0.0"
+      - "--streamable-http-port=8000"
