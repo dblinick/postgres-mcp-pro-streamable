@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import sys
+import socket
 from urllib.parse import quote
 from enum import Enum
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Union
 
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from pydantic import validate_call
@@ -37,8 +39,73 @@ from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
 from .top_queries import TopQueriesCalc
 
+def _parse_env_list(name: str) -> list[str]:
+    raw = os.environ.get(name)
+    if not raw:
+        return []
+    return [value.strip() for value in raw.split(",") if value.strip()]
+
+
+def _resolve_host_ip(host: str) -> str | None:
+    try:
+        return socket.gethostbyname(host)
+    except socket.gaierror:
+        return None
+
+
+def _detect_local_ips() -> set[str]:
+    ips: set[str] = set()
+
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            if info[0] == socket.AF_INET:
+                ips.add(str(info[4][0]))
+    except socket.gaierror:
+        pass
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8", 80))
+        ips.add(str(sock.getsockname()[0]))
+        sock.close()
+    except OSError:
+        pass
+
+    return ips
+
+
+def build_transport_security_settings() -> TransportSecuritySettings:
+    if os.environ.get("MCP_DISABLE_DNS_REBINDING", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+    allowed_hosts = set(_parse_env_list("MCP_ALLOWED_HOSTS"))
+    allowed_origins = set(_parse_env_list("MCP_ALLOWED_ORIGINS"))
+
+    local_ips = _detect_local_ips()
+    docker_host_ip = _resolve_host_ip("host.docker.internal")
+    if docker_host_ip:
+        local_ips.add(docker_host_ip)
+
+    for host in {"localhost", "127.0.0.1", *local_ips}:
+        host_str = str(host)
+        allowed_hosts.add(host_str)
+        allowed_hosts.add(f"{host_str}:*")
+        allowed_origins.add(f"http://{host_str}:*")
+        allowed_origins.add(f"https://{host_str}:*")
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=sorted(allowed_hosts),
+        allowed_origins=sorted(allowed_origins),
+    )
+
+
 # Initialize FastMCP with default settings
-mcp = FastMCP("postgres-mcp")
+mcp = FastMCP("postgres-mcp", transport_security=build_transport_security_settings())
 
 # Constants
 PG_STAT_STATEMENTS = "pg_stat_statements"
