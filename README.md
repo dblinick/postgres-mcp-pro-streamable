@@ -256,6 +256,16 @@ export POSTGRES_HOST=your_db_host
 export POSTGRES_PORT=5432
 export POSTGRES_DATABASE=your_database
 export POSTGRES_SSL_MODE=disable
+
+# Optional streamable HTTP auth
+export MCP_API_KEY=your_api_key
+
+# Optional DNS rebinding allowlist
+export MCP_ALLOWED_HOSTS=192.168.5.30,192.168.5.30:8000
+export MCP_ALLOWED_ORIGINS=http://192.168.5.30:8000
+
+# Disable DNS rebinding protection (not recommended)
+export MCP_DISABLE_DNS_REBINDING=false
 ```
 
 **Legacy (DATABASE_URI)**
@@ -327,6 +337,17 @@ The default endpoint path is `/mcp`.
 ### Optional API Key (Streamable HTTP Only)
 
 If `MCP_API_KEY` is set, streamable HTTP requests must include `X-API-Key` with that value. If not set, requests are allowed without authentication.
+
+### DNS Rebinding Protection
+
+Streamable HTTP validates `Host` and `Origin` headers to prevent DNS rebinding attacks. If you see `Invalid Host header`, set explicit allowlists:
+
+```bash
+export MCP_ALLOWED_HOSTS=192.168.5.30,192.168.5.30:8000
+export MCP_ALLOWED_ORIGINS=http://192.168.5.30:8000
+```
+
+You can disable this protection with `MCP_DISABLE_DNS_REBINDING=true` (not recommended for production).
 
 Example request:
 
